@@ -123,7 +123,7 @@ ss::future<> partition_manager::start() {
             return check_and_release_idle_partitions().handle_exception([](std::exception_ptr e) {
                 vlog(clusterlog.error, "Error in idle partition check: {}", e);
             }).then([this, idle_timeout] {
-                // Reschedule the timer for the next check after 5 seconds
+                // Reschedule the timer for the next check after idle_timeout
                 _idle_check_timer.arm(std::chrono::milliseconds(idle_timeout));
             });
         });
