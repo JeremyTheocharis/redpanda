@@ -400,6 +400,9 @@ public:
     // Release memory-heavy caches for idle partitions.
     ss::future<> release_idle_caches();
 
+    // Reactivate resources for a partition that is idle.
+    ss::future<> reactivate();
+
     // Accessor for resource state
     resource_state state() const { return _resource_state; }
 

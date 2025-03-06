@@ -1760,6 +1760,25 @@ ss::future<> partition::release_idle_caches() {
     co_return;
 }
 
+ss::future<> partition::reactivate() {
+    if (_resource_state != resource_state::idle) {
+        // Already active; nothing to do.
+        co_return;
+    }
+    
+    // Log reactivation
+    vlog(clusterlog.info, "Reactivating partition {} from idle state", ntp());
+    
+    // (Stub) Reinitialize or reattach any required resources here.
+    // For now, we simply mark the partition as active.
+    _resource_state = resource_state::active;
+    
+    // Update last access time to indicate reactivation.
+    update_last_access();
+    
+    co_return;
+}
+
 } // namespace cluster
 
 namespace seastar {
