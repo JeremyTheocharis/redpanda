@@ -720,6 +720,9 @@ struct configuration final : public config_store {
 
     property<bool> iceberg_delete;
 
+    property<bool> enable_idle_partition_caching;
+    property<std::chrono::milliseconds> idle_partition_timeout_ms;
+
     configuration();
 
     error_map_t load(const YAML::Node& root_node);

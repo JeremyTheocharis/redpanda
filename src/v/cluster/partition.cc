@@ -51,8 +51,12 @@ partition::partition(
   ss::lw_shared_ptr<const archival::configuration> archival_conf,
   ss::sharded<features::feature_table>& feature_table,
   ss::sharded<archival::upload_housekeeping_service>& upload_hks,
+  config::binding<bool>& enable_idle_partition_caching,
+  config::binding<std::chrono::milliseconds>& idle_partition_timeout_ms,
   std::optional<cloud_storage_clients::bucket_name> read_replica_bucket)
-  : _raft(std::move(r))
+  : _enable_idle_partition_caching(enable_idle_partition_caching)
+  , _idle_partition_timeout_ms(idle_partition_timeout_ms)
+  , _raft(std::move(r))
   , _probe(std::make_unique<replicated_partition_probe>(*this))
   , _feature_table(feature_table)
   , _archival_conf(std::move(archival_conf))
@@ -456,6 +460,7 @@ raft::group_id partition::group() const { return _raft->group(); }
 ss::future<> partition::start(
   state_machine_registry& stm_registry,
   const std::optional<xshard_transfer_state>& xst_state) {
+    update_last_access();  // Record the startup as the last access time
     const auto& ntp = _raft->ntp();
     raft::state_machine_manager_builder builder = stm_registry.make_builder_for(
       _raft.get());
@@ -1739,6 +1744,20 @@ ss::future<result<ssx::rwlock_unit>> partition::hold_writes_enabled() {
     }
 
     co_return *std::move(maybe_units);
+}
+
+ss::future<> partition::release_idle_caches() {
+    // Log that we are releasing idle caches.
+    vlog(clusterlog.info, "Releasing idle caches for partition {}", ntp());
+
+    // Stub: In the future, insert code here to reset STMs and clear caches.
+    // For now, simply set the partition state to idle.
+    _resource_state = resource_state::idle;
+    
+    // Update the last access time to track when we entered idle state
+    update_last_access();
+
+    co_return;
 }
 
 } // namespace cluster

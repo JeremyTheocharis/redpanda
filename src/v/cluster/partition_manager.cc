@@ -269,6 +269,10 @@ ss::future<consensus_ptr> partition_manager::manage(
         log,
         enable_learner_recovery_throttle,
         keep_snapshotted_log);
+    
+    // Store configuration bindings in local variables to ensure proper lifetime
+    config::binding<bool> idle_flag = config::shard_local_cfg().enable_idle_partition_caching.bind();
+    config::binding<std::chrono::milliseconds> timeout_flag = config::shard_local_cfg().idle_partition_timeout_ms.bind();
 
     auto p = ss::make_lw_shared<partition>(
       c,
@@ -277,6 +281,8 @@ ss::future<consensus_ptr> partition_manager::manage(
       _archival_conf,
       _feature_table,
       _upload_hks,
+      idle_flag,
+      timeout_flag,
       read_replica_bucket);
 
     _ntp_table.emplace(log->config().ntp(), p);

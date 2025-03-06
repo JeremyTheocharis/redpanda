@@ -1,0 +1,216 @@
+diff --git a/.gitignore b/.gitignore
+index 460e49bffe..36993d50bb 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -268,4 +268,7 @@ vbuild/
+ user.bazelrc
+ 
+ # Ctest
+-/Testing
+\ No newline at end of file
++/Testing
++
++# local build
++redpanda
+\ No newline at end of file
+diff --git a/README_umh b/README_umh
+new file mode 100644
+index 0000000000..5bf0bee48a
+--- /dev/null
++++ b/README_umh
+@@ -0,0 +1,17 @@
++sudo mount -t tmpfs -o size=30G tmpfs /home/umh/.cache
++sudo mount -t tmpfs -o size=50G tmpfs /mnt/ramdisk
++
++bazel build --config=release //:redpanda
++
++cp bazel-bin/src/v/redpanda/redpanda .
++chmod +x redpanda
++
++sudo ln -s /lib/x86_64-linux-gnu/libcom_err.so.2 /lib/x86_64-linux-gnu/libcom_err.so.3
++
++./redpanda --version
++
++# install rpk 
++curl -LO https://github.com/redpanda-data/redpanda/releases/latest/download/rpk-linux-amd64.zip &&
++  mkdir -p ~/.local/bin &&
++  export PATH="~/.local/bin:$PATH" &&
++  unzip rpk-linux-amd64.zip -d ~/.local/bin/
+\ No newline at end of file
+diff --git a/src/v/cluster/partition.cc b/src/v/cluster/partition.cc
+index 8febc0d334..74ceec4990 100644
+--- a/src/v/cluster/partition.cc
++++ b/src/v/cluster/partition.cc
+@@ -51,8 +51,12 @@ partition::partition(
+   ss::lw_shared_ptr<const archival::configuration> archival_conf,
+   ss::sharded<features::feature_table>& feature_table,
+   ss::sharded<archival::upload_housekeeping_service>& upload_hks,
++  config::binding<bool>& enable_idle_partition_caching,
++  config::binding<std::chrono::milliseconds>& idle_partition_timeout_ms,
+   std::optional<cloud_storage_clients::bucket_name> read_replica_bucket)
+-  : _raft(std::move(r))
++  : _enable_idle_partition_caching(enable_idle_partition_caching)
++  , _idle_partition_timeout_ms(idle_partition_timeout_ms)
++  , _raft(std::move(r))
+   , _probe(std::make_unique<replicated_partition_probe>(*this))
+   , _feature_table(feature_table)
+   , _archival_conf(std::move(archival_conf))
+@@ -456,6 +460,7 @@ raft::group_id partition::group() const { return _raft->group(); }
+ ss::future<> partition::start(
+   state_machine_registry& stm_registry,
+   const std::optional<xshard_transfer_state>& xst_state) {
++    update_last_access();  // Record the startup as the last access time
+     const auto& ntp = _raft->ntp();
+     raft::state_machine_manager_builder builder = stm_registry.make_builder_for(
+       _raft.get());
+@@ -1741,6 +1746,20 @@ ss::future<result<ssx::rwlock_unit>> partition::hold_writes_enabled() {
+     co_return *std::move(maybe_units);
+ }
+ 
++ss::future<> partition::release_idle_caches() {
++    // Log that we are releasing idle caches.
++    vlog(clusterlog.info, "Releasing idle caches for partition {}", ntp());
++
++    // Stub: In the future, insert code here to reset STMs and clear caches.
++    // For now, simply set the partition state to idle.
++    _resource_state = resource_state::idle;
++    
++    // Update the last access time to track when we entered idle state
++    update_last_access();
++
++    co_return;
++}
++
+ } // namespace cluster
+ 
+ namespace seastar {
+diff --git a/src/v/cluster/partition.h b/src/v/cluster/partition.h
+index e571b4e9b7..9271fedfc7 100644
+--- a/src/v/cluster/partition.h
++++ b/src/v/cluster/partition.h
+@@ -48,6 +48,11 @@ struct xshard_transfer_state {
+ /// all raft logic is proxied transparently
+ class partition : public ss::enable_lw_shared_from_this<partition> {
+ public:
++    enum class resource_state {
++        active,
++        idle
++    };
++
+     partition(
+       consensus_ptr r,
+       ss::sharded<cloud_storage::remote>&,
+@@ -55,6 +60,8 @@ public:
+       ss::lw_shared_ptr<const archival::configuration>,
+       ss::sharded<features::feature_table>&,
+       ss::sharded<archival::upload_housekeeping_service>&,
++      config::binding<bool>& enable_idle_partition_caching,
++      config::binding<std::chrono::milliseconds>& idle_partition_timeout_ms,
+       std::optional<cloud_storage_clients::bucket_name> read_replica_bucket
+       = std::nullopt);
+ 
+@@ -368,6 +375,34 @@ public:
+     bool started() const noexcept { return _started; }
+     void mark_started() noexcept { _started = true; }
+ 
++    // Track last access time for idle partition detection
++    ss::lowres_clock::time_point _last_access{ss::lowres_clock::now()};
++    config::binding<bool>& _enable_idle_partition_caching;
++    config::binding<std::chrono::milliseconds>& _idle_partition_timeout_ms;
++
++    // Update last access time when partition is accessed
++    void update_last_access() {
++        if (_enable_idle_partition_caching()) {
++            _last_access = ss::lowres_clock::now();
++        }
++    }
++
++    // Get the last access time
++    ss::lowres_clock::time_point last_access() const {
++        return _last_access;
++    }
++
++    // Get the idle timeout configuration
++    std::chrono::milliseconds idle_timeout() const {
++        return _idle_partition_timeout_ms();
++    }
++
++    // Release memory-heavy caches for idle partitions.
++    ss::future<> release_idle_caches();
++
++    // Accessor for resource state
++    resource_state state() const { return _resource_state; }
++
+ private:
+     ss::future<result<ssx::rwlock_unit>> hold_writes_enabled();
+ 
+@@ -433,6 +468,8 @@ private:
+ 
+     bool _started{false};
+ 
++    resource_state _resource_state{resource_state::active};
++
+     friend std::ostream& operator<<(std::ostream& o, const partition& x);
+ };
+ } // namespace cluster
+diff --git a/src/v/cluster/partition_manager.cc b/src/v/cluster/partition_manager.cc
+index 5183f8670b..5b87e93bfa 100644
+--- a/src/v/cluster/partition_manager.cc
++++ b/src/v/cluster/partition_manager.cc
+@@ -269,6 +269,10 @@ ss::future<consensus_ptr> partition_manager::manage(
+         log,
+         enable_learner_recovery_throttle,
+         keep_snapshotted_log);
++    
++    // Store configuration bindings in local variables to ensure proper lifetime
++    config::binding<bool> idle_flag = config::shard_local_cfg().enable_idle_partition_caching.bind();
++    config::binding<std::chrono::milliseconds> timeout_flag = config::shard_local_cfg().idle_partition_timeout_ms.bind();
+ 
+     auto p = ss::make_lw_shared<partition>(
+       c,
+@@ -277,6 +281,8 @@ ss::future<consensus_ptr> partition_manager::manage(
+       _archival_conf,
+       _feature_table,
+       _upload_hks,
++      idle_flag,
++      timeout_flag,
+       read_replica_bucket);
+ 
+     _ntp_table.emplace(log->config().ntp(), p);
+diff --git a/src/v/config/configuration.cc b/src/v/config/configuration.cc
+index 83d5cdfcd7..b2ea8bb3c6 100644
+--- a/src/v/config/configuration.cc
++++ b/src/v/config/configuration.cc
+@@ -3864,6 +3864,18 @@ configuration::configuration()
+       "the topic.",
+       {.needs_restart = needs_restart::no, .visibility = visibility::user},
+       true)
++  , enable_idle_partition_caching(
++      *this,
++      "enable_idle_partition_caching",
++      "Disable caching for partitions that become idle (frees memory).",
++      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
++      false)
++  , idle_partition_timeout_ms(
++      *this,
++      "idle_partition_timeout_ms",
++      "Time threshold for partition inactivity before caches are freed.",
++      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
++      std::chrono::milliseconds(60000))
+   , development_enable_cloud_topics(
+       *this,
+       "development_enable_cloud_topics",
+diff --git a/src/v/config/configuration.h b/src/v/config/configuration.h
+index 5c06cfdb8f..aaf7db0054 100644
+--- a/src/v/config/configuration.h
++++ b/src/v/config/configuration.h
+@@ -720,6 +720,9 @@ struct configuration final : public config_store {
+ 
+     property<bool> iceberg_delete;
+ 
++    property<bool> enable_idle_partition_caching;
++    property<std::chrono::milliseconds> idle_partition_timeout_ms;
++
+     configuration();
+ 
+     error_map_t load(const YAML::Node& root_node);

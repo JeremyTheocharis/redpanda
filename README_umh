@@ -1,0 +1,17 @@
+sudo mount -t tmpfs -o size=30G tmpfs /home/umh/.cache
+sudo mount -t tmpfs -o size=50G tmpfs /mnt/ramdisk
+
+bazel build --config=release //:redpanda
+
+cp bazel-bin/src/v/redpanda/redpanda .
+chmod +x redpanda
+
+sudo ln -s /lib/x86_64-linux-gnu/libcom_err.so.2 /lib/x86_64-linux-gnu/libcom_err.so.3
+
+./redpanda --version
+
+# install rpk 
+curl -LO https://github.com/redpanda-data/redpanda/releases/latest/download/rpk-linux-amd64.zip &&
+  mkdir -p ~/.local/bin &&
+  export PATH="~/.local/bin:$PATH" &&
+  unzip rpk-linux-amd64.zip -d ~/.local/bin/

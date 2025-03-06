@@ -3864,6 +3864,18 @@ configuration::configuration()
       "the topic.",
       {.needs_restart = needs_restart::no, .visibility = visibility::user},
       true)
+  , enable_idle_partition_caching(
+      *this,
+      "enable_idle_partition_caching",
+      "Disable caching for partitions that become idle (frees memory).",
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      false)
+  , idle_partition_timeout_ms(
+      *this,
+      "idle_partition_timeout_ms",
+      "Time threshold for partition inactivity before caches are freed.",
+      {.needs_restart = needs_restart::no, .visibility = visibility::tunable},
+      std::chrono::milliseconds(60000))
   , development_enable_cloud_topics(
       *this,
       "development_enable_cloud_topics",

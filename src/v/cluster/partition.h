@@ -48,6 +48,11 @@ struct xshard_transfer_state {
 /// all raft logic is proxied transparently
 class partition : public ss::enable_lw_shared_from_this<partition> {
 public:
+    enum class resource_state {
+        active,
+        idle
+    };
+
     partition(
       consensus_ptr r,
       ss::sharded<cloud_storage::remote>&,
@@ -55,6 +60,8 @@ public:
       ss::lw_shared_ptr<const archival::configuration>,
       ss::sharded<features::feature_table>&,
       ss::sharded<archival::upload_housekeeping_service>&,
+      config::binding<bool>& enable_idle_partition_caching,
+      config::binding<std::chrono::milliseconds>& idle_partition_timeout_ms,
       std::optional<cloud_storage_clients::bucket_name> read_replica_bucket
       = std::nullopt);
 
@@ -368,6 +375,34 @@ public:
     bool started() const noexcept { return _started; }
     void mark_started() noexcept { _started = true; }
 
+    // Track last access time for idle partition detection
+    ss::lowres_clock::time_point _last_access{ss::lowres_clock::now()};
+    config::binding<bool>& _enable_idle_partition_caching;
+    config::binding<std::chrono::milliseconds>& _idle_partition_timeout_ms;
+
+    // Update last access time when partition is accessed
+    void update_last_access() {
+        if (_enable_idle_partition_caching()) {
+            _last_access = ss::lowres_clock::now();
+        }
+    }
+
+    // Get the last access time
+    ss::lowres_clock::time_point last_access() const {
+        return _last_access;
+    }
+
+    // Get the idle timeout configuration
+    std::chrono::milliseconds idle_timeout() const {
+        return _idle_partition_timeout_ms();
+    }
+
+    // Release memory-heavy caches for idle partitions.
+    ss::future<> release_idle_caches();
+
+    // Accessor for resource state
+    resource_state state() const { return _resource_state; }
+
 private:
     ss::future<result<ssx::rwlock_unit>> hold_writes_enabled();
 
@@ -432,6 +467,8 @@ private:
     ssx::rwlock _produce_lock;
 
     bool _started{false};
+
+    resource_state _resource_state{resource_state::active};
 
     friend std::ostream& operator<<(std::ostream& o, const partition& x);
 };
