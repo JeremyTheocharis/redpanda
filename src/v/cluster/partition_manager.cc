@@ -119,15 +119,15 @@ ss::future<> partition_manager::start() {
     
     // Set up periodic idle partition checks only if the feature flag is enabled
     if (config::shard_local_cfg().enable_idle_partition_caching()) {
-        _idle_check_timer.set_callback([this] {
+        _idle_check_timer.set_callback([this, idle_timeout] {
             return check_and_release_idle_partitions().handle_exception([](std::exception_ptr e) {
                 vlog(clusterlog.error, "Error in idle partition check: {}", e);
-            }).then([this] {
+            }).then([this, idle_timeout] {
                 // Reschedule the timer for the next check after 5 seconds
-                _idle_check_timer.arm(std::chrono::seconds(5));
+                _idle_check_timer.arm(std::chrono::milliseconds(idle_timeout));
             });
         });
-        _idle_check_timer.arm(std::chrono::seconds(5));
+        _idle_check_timer.arm(std::chrono::milliseconds(idle_timeout));
     }
     
     co_return;
@@ -593,8 +593,9 @@ ss::future<> partition_manager::check_and_release_idle_partitions() {
             auto last_access = partition_ptr->last_access();
             if (now - last_access > idle_timeout) {
                 // Log the idle condition
-                vlog(clusterlog.info, "Partition {} has been idle for {} ms; releasing caches", 
-                     ntp, (now - last_access).count());
+                auto idle_duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_access).count();
+                vlog(clusterlog.info, "Partition {} has been idle for {} ms; releasing caches", ntp, idle_duration_ms);
+
                 // Release caches
                 partition_ptr->release_idle_caches();
             }
