@@ -110,6 +110,13 @@ partition_manager::get_topic_partition_table(
 ss::future<> partition_manager::start() {
     maybe_arm_shutdown_watchdog();
     
+    // Log idle partition caching feature state
+    auto idle_timeout = config::shard_local_cfg().idle_partition_timeout_ms();
+    vlog(clusterlog.info, 
+         "Idle partition caching is {} with timeout of {} ms", 
+         config::shard_local_cfg().enable_idle_partition_caching() ? "enabled" : "disabled",
+         idle_timeout.count());
+    
     // Set up periodic idle partition checks only if the feature flag is enabled
     if (config::shard_local_cfg().enable_idle_partition_caching()) {
         _idle_check_timer.set_callback([this] {
