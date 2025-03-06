@@ -269,6 +269,9 @@ private:
 
     void check_partitions_shutdown_state();
 
+    // Check for and release idle partitions
+    ss::future<> check_and_release_idle_partitions();
+
     void maybe_arm_shutdown_watchdog();
     storage::api& _storage;
     /// used to wait for concurrent recoveries
@@ -292,6 +295,9 @@ private:
     ss::gate _gate;
     config::binding<std::chrono::milliseconds> _partition_shutdown_timeout;
     ss::timer<> _shutdown_watchdog;
+
+    // Timer for periodic idle partition checks
+    ss::timer<> _idle_check_timer;
 
     // In general, all our background work is in partition objects which
     // have their own abort source.  This abort source is only for work that

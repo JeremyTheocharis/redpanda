@@ -109,6 +109,20 @@ partition_manager::get_topic_partition_table(
 
 ss::future<> partition_manager::start() {
     maybe_arm_shutdown_watchdog();
+    
+    // Set up periodic idle partition checks only if the feature flag is enabled
+    if (config::shard_local_cfg().enable_idle_partition_caching()) {
+        _idle_check_timer.set_callback([this] {
+            return check_and_release_idle_partitions().handle_exception([](std::exception_ptr e) {
+                vlog(clusterlog.error, "Error in idle partition check: {}", e);
+            }).then([this] {
+                // Reschedule the timer for the next check after 5 seconds
+                _idle_check_timer.arm(std::chrono::seconds(5));
+            });
+        });
+        _idle_check_timer.arm(std::chrono::seconds(5));
+    }
+    
     co_return;
 }
 
@@ -558,6 +572,28 @@ std::ostream& operator<<(
     case partition_manager::partition_shutdown_stage::finalizing_remote_storage:
         return o << "finalizing_remote_storage";
     }
+}
+
+ss::future<> partition_manager::check_and_release_idle_partitions() {
+    // Get the idle timeout from the global configuration
+    auto idle_timeout = config::shard_local_cfg().idle_partition_timeout_ms();
+    auto now = ss::lowres_clock::now();
+    
+    // Iterate through all managed partitions
+    for (auto& [ntp, partition_ptr] : _ntp_table) {
+        // Only process if the partition is active
+        if (partition_ptr->state() == cluster::partition::resource_state::active) {
+            auto last_access = partition_ptr->last_access();
+            if (now - last_access > idle_timeout) {
+                // Log the idle condition
+                vlog(clusterlog.info, "Partition {} has been idle for {} ms; releasing caches", 
+                     ntp, (now - last_access).count());
+                // Release caches
+                co_await partition_ptr->release_idle_caches();
+            }
+        }
+    }
+    co_return;
 }
 
 } // namespace cluster
