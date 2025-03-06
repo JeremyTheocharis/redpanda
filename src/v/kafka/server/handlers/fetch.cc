@@ -332,6 +332,9 @@ static ss::future<read_result> do_read_from_ntp(
         co_return read_result(error_code::not_leader_for_partition);
     }
 
+    // Ensure the partition is active
+    kafka_partition->ensure_active();
+
     /**
      * validate leader epoch. for more details see KIP-320
      */

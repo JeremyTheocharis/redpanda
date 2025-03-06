@@ -1746,7 +1746,7 @@ ss::future<result<ssx::rwlock_unit>> partition::hold_writes_enabled() {
     co_return *std::move(maybe_units);
 }
 
-ss::future<> partition::release_idle_caches() {
+void partition::release_idle_caches() {
     // Log that we are releasing idle caches.
     vlog(clusterlog.info, "Releasing idle caches for partition {}", ntp());
 
@@ -1756,14 +1756,12 @@ ss::future<> partition::release_idle_caches() {
     
     // Update the last access time to track when we entered idle state
     update_last_access();
-
-    co_return;
 }
 
-ss::future<> partition::reactivate() {
+void partition::reactivate() {
     if (_resource_state != resource_state::idle) {
         // Already active; nothing to do.
-        co_return;
+        return;
     }
     
     // Log reactivation
@@ -1775,8 +1773,6 @@ ss::future<> partition::reactivate() {
     
     // Update last access time to indicate reactivation.
     update_last_access();
-    
-    co_return;
 }
 
 } // namespace cluster

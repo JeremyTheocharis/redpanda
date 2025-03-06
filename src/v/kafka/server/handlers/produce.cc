@@ -182,6 +182,9 @@ static partition_produce_stages partition_append(
   int32_t num_records,
   int64_t num_bytes,
   std::chrono::milliseconds timeout_ms) {
+    // Ensure the partition is active
+    partition->ensure_active();
+
     auto stages = partition->replicate(
       bid, std::move(reader), acks_to_replicate_options(acks, timeout_ms));
     return partition_produce_stages{

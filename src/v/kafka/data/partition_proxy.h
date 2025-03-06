@@ -90,6 +90,10 @@ public:
 
         virtual result<partition_info> get_partition_info() const = 0;
         virtual cluster::partition_probe& probe() = 0;
+
+        // Ensures the partition is active; if it is idle, reactivates it.
+        virtual void ensure_active() = 0;
+
         virtual ~impl() noexcept = default;
     };
 
@@ -176,6 +180,9 @@ public:
       raft::replicate_options opts) {
         return _impl->replicate(bi, std::move(r), opts);
     }
+
+    // Idle caching methods
+    void ensure_active() { return _impl->ensure_active(); }
 
 private:
     std::unique_ptr<impl> _impl;

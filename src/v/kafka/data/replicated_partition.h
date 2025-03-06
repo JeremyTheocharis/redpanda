@@ -101,6 +101,9 @@ public:
 
     result<partition_info> get_partition_info() const final;
 
+    // Ensures the partition is active; if it is idle, reactivates it.
+    void ensure_active() final;
+
 private:
     // Returns the Kafka offset corresponding to the lowest offset in the
     // log, including local and cloud storage. Doesn't take into account any

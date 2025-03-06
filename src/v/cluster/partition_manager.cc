@@ -596,7 +596,7 @@ ss::future<> partition_manager::check_and_release_idle_partitions() {
                 vlog(clusterlog.info, "Partition {} has been idle for {} ms; releasing caches", 
                      ntp, (now - last_access).count());
                 // Release caches
-                co_await partition_ptr->release_idle_caches();
+                partition_ptr->release_idle_caches();
             }
         }
     }

@@ -660,4 +660,13 @@ result<partition_info> replicated_partition::get_partition_info() const {
     return {std::move(ret)};
 }
 
+// Ensures the partition is active; if it is idle, reactivates it.
+void replicated_partition::ensure_active() {
+    // Check if the underlying partition is idle, and if so, reactivate it.
+    if (_partition->state() == cluster::partition::resource_state::idle) {
+        _partition->reactivate();
+    }
+    _partition->update_last_access();
+}
+
 } // namespace kafka
